@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from typing import Union
 import matplotlib.pyplot as plt
 import streamlit as st
+import pandas as pd
 import webbrowser
 import requests
 import secrets
@@ -60,16 +61,17 @@ def get_myanimelist_data(title: str) -> dict:
 	list_request_url = f'{base_url}?q={title}&limit=1'
 	list_response = requests.get(list_request_url, headers=headers)	
 	anime_search = json.loads(list_response.text)
-	anime_id = anime_search['data'][0]['node']['id']
-	fields = '?fields=title,mean,rank,popularity,num_list_users,num_scoring_users,statistics'
-	details_request_url = f'{base_url}/{anime_id}{fields}'
-	details_response = requests.get(details_request_url, headers=headers)
-	details = json.loads(details_response.text)
-	status = details['statistics']['status']
-	myanimelist_data = {field:details[field] for field in details.keys() if field != 'statistics'}
-	for field in status:
-		myanimelist_data[field] = status[field]
-	return myanimelist_data
+	if anime_search['data']:
+		anime_id = anime_search['data'][0]['node']['id']
+		fields = '?fields=title,mean,rank,popularity,num_list_users,num_scoring_users,statistics'
+		details_request_url = f'{base_url}/{anime_id}{fields}'
+		details_response = requests.get(details_request_url, headers=headers)
+		details = json.loads(details_response.text)
+		status = details['statistics']['status']
+		myanimelist_data = {field:details[field] for field in details.keys() if field != 'statistics'}
+		for field in status:
+			myanimelist_data[field] = status[field]
+		return myanimelist_data
 
 
 def setup_db(db_name: str):
@@ -103,7 +105,7 @@ def create_myanimelist_table(myanimelist_data: dict, cur, conn):
 	cur.execute("SELECT MAX(id) FROM MyAnimeList")
 	max_id = cur.fetchall()[0][0]
 	title = myanimelist_data['title']
-	score = float(myanimelist_data['mean'])
+	score = float(myanimelist_data['mean']) if 'mean' in myanimelist_data else 0.0
 	rank = int(myanimelist_data['rank'])
 	popularity = int(myanimelist_data['popularity'])
 	audience = int(myanimelist_data['num_list_users'])
@@ -130,8 +132,8 @@ def table_exists(cur, conn) -> tuple:
 	return cur.fetchall()
 
 
-def in_db(title: str, cur, conn) -> Union[tuple, bool]:
-	"""Check if the title is already stored in the database."""
+def in_youtube_table(title: str, cur, conn) -> Union[tuple, bool]:
+	"""Check if the title is already stored in the YouTube table."""
 	if table_exists(cur, conn):
 		cur.execute("SELECT title FROM YouTube WHERE title = ?", (title,))
 		return cur.fetchall()
@@ -139,40 +141,86 @@ def in_db(title: str, cur, conn) -> Union[tuple, bool]:
 		return False
 
 
-def search(title: str, cur, conn):
-	"""Retrieve and store title data from YouTube and MyAnimeList."""
-	st.text('Extracting data from YouTube...')
-	api_key = os.getenv('POETRY_YOUTUBE_API_KEY')
-	youtube_data = get_youtube_data(api_key, title)
-	st.text('Scanning MyAnimeList...')
-	myanimelist_data = get_myanimelist_data(title)
-	create_youtube_table(youtube_data, cur, conn)
-	create_myanimelist_table(myanimelist_data, cur, conn)
-	st.text(f'{title} is added to the database.')
-	
-
-def search_by_season(season: str, year: str, cur, conn):
-	"""Retrieve data on a random title from the selected season and year."""
-	st.text('Creating anime list...')
-	anime_list = create_anime_list(season, year)
-	st.text('Choosing a random title...')
-	random_title = select_title(anime_list)
-	if in_db(random_title, cur, conn):
-		st.text(f'{random_title} is already in database.')
-		st.text('Trimming anime list...')
-		anime_list = trim_anime_list(anime_list, random_title)
+def in_myanimelist_table(title: str, cur, conn) -> Union[tuple, bool]:
+	"""Check if the title is already stored in the MyAnimeList table."""
+	if table_exists(cur, conn):
+		cur.execute("SELECT title FROM MyAnimeList WHERE title = ?", (title,))
+		return cur.fetchall()
 	else:
-		st.text('Trimming anime list...')
-		anime_list = trim_anime_list(anime_list, random_title)
-		search(random_title, cur, conn)
+		return False
+
+
+def in_both_tables(title: str, cur, conn) -> bool:
+	"""Check if the title populates both tables in the database."""
+	return in_myanimelist_table(title, cur, conn) and in_youtube_table(title, cur, conn)
+
+
+def search(title: str, cur, conn, need_youtube=True, need_myanimelist=True):
+	"""Retrieve and store title data from YouTube and MyAnimeList."""
+	if need_myanimelist:
+		st.text('Scanning MyAnimeList...')
+		time.sleep(0.5)
+		myanimelist_data = get_myanimelist_data(title)
+		if myanimelist_data:
+			create_myanimelist_table(myanimelist_data, cur, conn)
+		else:
+			st.text(f'No MyAnimeList data available for {title}.')
+			time.sleep(0.5)
+			st.text(f'Search canceled for this title.')
+			time.sleep(0.5)
+			return None
+	
+	if need_youtube:
+		st.text('Extracting data from YouTube...')
+		time.sleep(0.5)
+		api_key = os.getenv('POETRY_YOUTUBE_API_KEY')
+		youtube_data = get_youtube_data(api_key, title)
+		create_youtube_table(youtube_data, cur, conn)
+	
+	if need_youtube and need_myanimelist:
+		st.text(f'{title} was added to the database.')
+		time.sleep(0.5)
+	elif need_youtube:
+		st.text(f'YouTube data for {title} was added to the database.')
+		time.sleep(0.5)
+	elif need_myanimelist:
+		st.text(f'MyAnimeList data for {title} was added to the database.')
+		time.sleep(0.5)	
 
 
 def search_by_title(title: str, cur, conn):
 	"""Retrieve data on user provided title."""
-	if in_db(title, cur, conn):
+	if in_both_tables(title, cur, conn):
 		st.text(f'{title} is already in database.')
+		time.sleep(0.5)
+	elif in_youtube_table(title, cur, conn):
+		st.text(f'YouTube data for {title} is already added.')
+		time.sleep(0.5)
+		st.text('Adding MyAnimeList data...')
+		time.sleep(0.5)
+		search(title, cur, conn, need_youtube=False)
+	elif in_myanimelist_table(title, cur, conn):
+		st.text(f'MyAnimeList data for {title} is already added.')
+		time.sleep(0.5)
+		st.text('Adding YouTube data...')
+		time.sleep(0.5)
+		search(title, cur, conn, need_myanimelist=False)
 	else:
 		search(title, cur, conn)
+
+
+def search_by_season(anime_list: list, cur, conn) -> list:
+	"""Retrieve data on a random title from the selected season and year."""
+	st.text('Choosing a random title...')
+	time.sleep(0.5)
+	random_title = select_title(anime_list)
+	search_by_title(random_title, cur, conn)
+	st.text('Trimming anime list...')
+	time.sleep(0.5)
+	anime_list = trim_anime_list(anime_list, random_title)
+	st.text('Trimming completed.')
+	time.sleep(0.5)
+	return anime_list
 
 
 def get_new_code_verifier() -> str:
@@ -226,6 +274,35 @@ def analyze_data(cur, conn):
 		st.text('Database is empty.')
 		
 
+class SeasonalSearch:
+	def __init__(self, season: str, year: str, cur, conn, limit: int):
+		self.season = season
+		self.year = year
+		self.cur = cur
+		self.conn = conn
+		self.limit = limit if limit <= 20 and limit >= 1 else 20 if limit >= 1 else 1
+
+	def run(self):
+		st.text('Creating anime list...')
+		time.sleep(0.5)
+		self.anime_list = create_anime_list(self.season, self.year)
+		df = pd.read_sql(
+			"""SELECT YouTube.title FROM YouTube INNER JOIN 
+			MyAnimeList ON YouTube.id=MyAnimeList.id""", 
+			conn
+		)
+		title_count = len(df['title'])
+		for _ in range(self.limit):
+			self.anime_list = search_by_season(self.anime_list, self.cur, self.conn)
+		new_df = pd.read_sql(
+			"""SELECT YouTube.title FROM YouTube INNER JOIN 
+			MyAnimeList ON YouTube.id=MyAnimeList.id""", 
+			conn
+		)
+		success_count = len(new_df['title']) - title_count
+		st.text(f'{success_count} titles successfully stored.')
+
+
 if __name__ == '__main__':
 	cur, conn = setup_db('anime.db')
 	
@@ -234,9 +311,11 @@ if __name__ == '__main__':
 	season = st.selectbox('Season', ('spring', 'summer', 'fall', 'winter'))
 	years = reversed(range(1972, int(time.ctime().split(' ')[-1]) + 1))
 	year = st.selectbox('Year', tuple(years))
+	limit = int(st.text_input('Title Limit (default: 1 | max: 20)', '1'))
 	if st.button('Search Season'):
-		search_by_season(season, year, cur, conn)
-	
+		seasonal_search = SeasonalSearch(season, year, cur, conn, limit)
+		seasonal_search.run()
+
 	anime = st.text_input('Title')
 	if st.button('Search Title'):
 		search_by_title(anime, cur, conn)
@@ -262,3 +341,7 @@ if __name__ == '__main__':
 		token = generate_new_token(authorization_code, code_verifier, client_id, client_secret)
 		os.environ['POETRY_MAL_ACCESS_TOKEN'] = token['access_token']
 		st.text('Access token saved.')
+
+	if st.button('Test Token'):
+		access_token = os.getenv('POETRY_MAL_ACCESS_TOKEN')
+		test_token(access_token)
