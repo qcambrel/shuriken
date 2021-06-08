@@ -155,55 +155,48 @@ def in_both_tables(title: str, cur, conn) -> bool:
 	return in_myanimelist_table(title, cur, conn) and in_youtube_table(title, cur, conn)
 
 
+def log_message(message: str, wait=0.5):
+	st.text(message)
+	time.sleep(wait)
+
+
 def search(title: str, cur, conn, need_youtube=True, need_myanimelist=True):
 	"""Retrieve and store title data from YouTube and MyAnimeList."""
 	if need_myanimelist:
-		st.text('Scanning MyAnimeList...')
-		time.sleep(0.5)
+		log_message('Scanning MyAnimeList...')
 		myanimelist_data = get_myanimelist_data(title)
 		if myanimelist_data:
 			create_myanimelist_table(myanimelist_data, cur, conn)
 		else:
-			st.text(f'No MyAnimeList data available for {title}.')
-			time.sleep(0.5)
-			st.text(f'Search canceled for this title.')
-			time.sleep(0.5)
+			log_message(f'No MyAnimeList data available for {title}.')
+			log_message(f'Search canceled for this title.')
 			return None
 	
 	if need_youtube:
-		st.text('Extracting data from YouTube...')
-		time.sleep(0.5)
+		log_message('Extracting data from YouTube...')
 		api_key = os.getenv('POETRY_YOUTUBE_API_KEY')
 		youtube_data = get_youtube_data(api_key, title)
 		create_youtube_table(youtube_data, cur, conn)
 	
 	if need_youtube and need_myanimelist:
-		st.text(f'{title} was added to the database.')
-		time.sleep(0.5)
+		log_message(f'{title} was added to the database.')
 	elif need_youtube:
-		st.text(f'YouTube data for {title} was added to the database.')
-		time.sleep(0.5)
+		log_message(f'YouTube data for {title} was added to the database.')
 	elif need_myanimelist:
-		st.text(f'MyAnimeList data for {title} was added to the database.')
-		time.sleep(0.5)	
+		log_message(f'MyAnimeList data for {title} was added to the database.')	
 
 
 def search_by_title(title: str, cur, conn):
 	"""Retrieve data on user provided title."""
 	if in_both_tables(title, cur, conn):
-		st.text(f'{title} is already in database.')
-		time.sleep(0.5)
+		log_message(f'{title} is already in database.')
 	elif in_youtube_table(title, cur, conn):
-		st.text(f'YouTube data for {title} is already added.')
-		time.sleep(0.5)
-		st.text('Adding MyAnimeList data...')
-		time.sleep(0.5)
+		log_message(f'YouTube data for {title} is already added.')
+		log_message('Adding MyAnimeList data...')
 		search(title, cur, conn, need_youtube=False)
 	elif in_myanimelist_table(title, cur, conn):
-		st.text(f'MyAnimeList data for {title} is already added.')
-		time.sleep(0.5)
-		st.text('Adding YouTube data...')
-		time.sleep(0.5)
+		log_message(f'MyAnimeList data for {title} is already added.')
+		log_message('Adding YouTube data...')
 		search(title, cur, conn, need_myanimelist=False)
 	else:
 		search(title, cur, conn)
@@ -211,15 +204,12 @@ def search_by_title(title: str, cur, conn):
 
 def search_by_season(anime_list: list, cur, conn) -> list:
 	"""Retrieve data on a random title from the selected season and year."""
-	st.text('Choosing a random title...')
-	time.sleep(0.5)
+	log_message('Choosing a random title...')
 	random_title = select_title(anime_list)
 	search_by_title(random_title, cur, conn)
-	st.text('Trimming anime list...')
-	time.sleep(0.5)
+	log_message('Trimming anime list...')
 	anime_list = trim_anime_list(anime_list, random_title)
-	st.text('Trimming completed.')
-	time.sleep(0.5)
+	log_message('Trimming completed.')
 	return anime_list
 
 
@@ -283,8 +273,7 @@ class SeasonalSearch:
 		self.limit = limit if limit <= 20 and limit >= 1 else 20 if limit >= 1 else 1
 
 	def run(self):
-		st.text('Creating anime list...')
-		time.sleep(0.5)
+		log_message('Creating anime list...')
 		self.anime_list = create_anime_list(self.season, self.year)
 		df = pd.read_sql(
 			"""SELECT YouTube.title FROM YouTube INNER JOIN 
